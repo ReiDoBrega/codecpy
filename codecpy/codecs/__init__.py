@@ -70,3 +70,11 @@ class CodecStreamInfo:
     has_text: bool = False
     video_codec: Optional[str] = None
     audio_codec: Optional[str] = None
+
+
+@dataclass
+class AudioCodecDetails(CodecDetails):
+    """Class representing comprehensive audio codec details"""
+    channels: Optional[str] = None
+    sample_rate: Optional[int] = None
+    bit_depth: Optional[int] = None

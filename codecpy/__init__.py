@@ -1,8 +1,8 @@
 import re
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Union
 from loggpy import Logger, logging
 
-from codecpy.codecs import CodecDetails, CodecInfo, CodecStreamInfo, CodecType
+from codecpy.codecs import AudioCodecDetails, CodecDetails, CodecInfo, CodecStreamInfo, CodecType
 from codecpy.colors import ColorInfo
 from codecpy.profiles import ProfileInfo
 from codecpy.container import ContainerInfo
@@ -476,6 +476,104 @@ class CodecPy:
                 pass
                 
         return result
+
+    @staticmethod
+    def parse_channel_format(channels: Union[str, float, int]) -> Optional[str]:
+        """
+        Converts channel representation to a human-readable format.
+        Handles numeric values, common layout codes, and special format strings.
+        
+        Args:
+            channels: Channel specification as string, float, or integer
+            
+        Returns:
+            Human-readable channel format (e.g. "2.0", "5.1", "7.1")
+        """
+        # Handle None or empty string
+        if channels is None or channels == "":
+            return None
+        
+        # Handle common industry codes
+        channel_codes = {
+            "A000": "2.0",    # Stereo
+            "F801": "5.1",    # 5.1 surround
+            "FA01": "7.1",    # 7.1 surround
+            "15/JOC": "16.0", # Dolby Atmos with Joint Object Coding
+            "22.2": "22.2",   # NHK 22.2
+            "3/0/0": "3.0",   # L/C/R
+            "5/0/0": "5.0",   # L/C/R/Ls/Rs
+            "5/0/2": "5.2",   # L/C/R/Ls/Rs + 2 LFE
+            "4/0/0": "4.0",   # Quadraphonic
+            "7/0/2": "7.2",   # 7.2 surround
+            "9/0/4": "9.4"    # 9.4 surround
+        }
+        
+        if isinstance(channels, str) and channels in channel_codes:
+            return channel_codes[channels]
+        
+        # Handle channel specifications with format X.Y
+        if isinstance(channels, str) and "/" in channels and not channels.endswith("/JOC"):
+            # Format might be front/side/back or front/side/LFE
+            parts = channels.split("/")
+            if len(parts) == 3:
+                try:
+                    total = int(parts[0]) + int(parts[1]) + int(parts[2])
+                    if int(parts[2]) > 0:
+                        # If last part is LFE
+                        return f"{int(parts[0]) + int(parts[1])}.{parts[2]}"
+                    else:
+                        return f"{total}.0"
+                except ValueError:
+                    pass
+        
+        # Handle integer values - return as X.0
+        if isinstance(channels, int) or (isinstance(channels, str) and channels.isdigit()):
+            return f"{int(channels)}.0"
+        
+        # Handle float values - ensure proper format
+        try:
+            if isinstance(channels, float) or (isinstance(channels, str) and "." in channels):
+                channel_float = float(channels)
+                main, sub = str(channel_float).split(".")
+                return f"{main}.{sub}"
+        except ValueError:
+            pass
+        
+        # Return as is for unrecognized formats
+        return str(channels)
+    
+    @classmethod
+    def get_audio_codec_details(cls, codec_string: str, channels: Optional[Union[str, float, int]] = None,
+                            sample_rate: Optional[int] = None, bit_depth: Optional[int] = None) -> AudioCodecDetails:
+        """
+        Get comprehensive information about an audio codec with channel configuration details.
+        
+        Args:
+            codec_string: The audio codec string to analyze
+            channels: Channel specification (can be code, number, or format string)
+            sample_rate: Optional sample rate in Hz
+            bit_depth: Optional bit depth
+            
+        Returns:
+            AudioCodecDetails object with all available codec information
+        """
+        base_details = cls.get_codec_details(codec_string)
+        
+        # Only process as audio if the codec is actually an audio codec
+        if base_details.type != CodecType.AUDIO:
+            return base_details
+        
+        return AudioCodecDetails(
+            original=base_details.original,
+            normalized=base_details.normalized,
+            type=base_details.type,
+            family=base_details.family,
+            profiles=base_details.profiles,
+            color_info=None,
+            channels=cls.parse_channel_format(channels),
+            sample_rate=sample_rate,
+            bit_depth=bit_depth
+        )
         
     @classmethod
     def get_codec_details(cls, codec_string: str) -> CodecDetails:
