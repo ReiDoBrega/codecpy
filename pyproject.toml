@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "codecpy"
+version = "0.1.0"
+description = "A comprehensive Python library for codec identification, normalization and media format analysis"
+authors = ["ReiDoBrega <pedro94782079@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/ReiDoBrega/codecpy"
+homepage = "https://github.com/ReiDoBrega/codecpy"
+keywords = ["codec", "media", "video", "audio", "format", "container", "mime-type", "h264", "h265", "aac"]
+
+[tool.poetry.dependencies]
+python = ">=3.7"
+dataclasses = {version = ">=0.6", python = "<3.7"}
+typing-extensions = {version = ">=3.7.4", python = "<3.8"}
+loggpy = ">=0.0.9"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.2.0"
+mypy = "^1.4"
+pre-commit = "^2.20.0"
+black = "^23.1.0"
+isort = "^5.12.0"
+flake8 = "^6.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
