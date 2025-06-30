@@ -1,6 +1,7 @@
 import re
 from typing import Dict, Optional, List, Tuple, Union
-from loggpy import Logger, logging
+
+from loggpy import Logger
 
 from codecpy.codecs import AudioCodecDetails, CodecDetails, CodecInfo, CodecStreamInfo, CodecType
 from codecpy.colors import ColorInfo
@@ -45,6 +46,8 @@ class CodecPy:
         "mp4a.a5": "AC3",
         "mp4a.A5": "AC3",
         "ec-3": "EAC3",
+        "e-ac3": "EAC3",
+        "ec3": "EAC3",
         "mp4a.a6": "EAC3",
         "mp4a.A6": "EAC3",
         "ac-4": "AC4",
@@ -89,8 +92,8 @@ class CodecPy:
         "hevc": "H265",
         
         # Dolby Vision
-        "dvh1": "DOLBY_VISION",
-        "dvhe": "DOLBY_VISION",
+        "dvh1": "DOVI",
+        "dvhe": "DOVI",
         
         # VP variants
         "vp8": "VP8",
@@ -98,9 +101,9 @@ class CodecPy:
         "vp09": "VP9",
         "vp9": "VP9",
         "vp9.0": "VP9",
-        "vp9.1": "VP9_PROFILE_1", 
-        "vp9.2": "VP9_PROFILE_2",
-        "vp9.3": "VP9_PROFILE_3",
+        "vp9.1": "VP9", 
+        "vp9.2": "VP9",
+        "vp9.3": "VP9",
         "av01": "AV1",
         
         # Other video codecs
@@ -144,7 +147,7 @@ class CodecPy:
         (r'^avc(1|3)?.*$', 'video', 'H264'),
         (r'^AVC(1|3)?.*$', 'video', 'H264'),
         (r'^(hev|hvc)1?.*$', 'video', 'H265'),
-        (r'^(dvh|dvhe)1?.*$', 'video', 'DOLBY_VISION'),
+        (r'^(dvh|dvhe)1?.*$', 'video', 'DOVI'),
         (r'^vp(09|9)(\.[0-9])?$', 'video', 'VP9'),
         (r'^av(01|1)(\.[0-9])?.*$', 'video', 'AV1'),
         
@@ -155,6 +158,7 @@ class CodecPy:
         (r'^mp4a\.[aA][cC]$', 'audio', 'DTS_HD'),
         (r'^mp4a\.[aA][9]$', 'audio', 'DTS'),
         (r'^dts-.*$', 'audio', 'DTS'),
+        (r'^ec3$', 'audio', 'EAC3'),
     ]
     
     # Container format detection
@@ -171,15 +175,12 @@ class CodecPy:
         "ism": "SMOOTH_STREAMING",
     }
     
-    def __init__(self, debug_mode: bool = False):
+    log = Logger('CodecPy')
+    
+    def __init__(self):
         """
         Initialize the CodecPy library
-        
-        Args:
-            debug_mode: If True, enables detailed logging for codec processing
         """
-        Logger.mount(level=logging.DEBUG if debug_mode else logging.INFO) # set it limited (dont need another things..)
-        self.log = Logger('CodecPy')
     
     @classmethod
     def normalize_codec(cls, codec_string: str, codec_type: Optional[str] = None) -> CodecInfo:
@@ -242,6 +243,8 @@ class CodecPy:
                 technical_id = 'mp4a.40'
             elif detected_type == 'audio' and 'DTS' in result:
                 technical_id = 'mp4a.a9' if result == 'DTS' else 'mp4a.ac'
+            elif detected_type == 'audio' and result == 'EAC3':
+                technical_id = 'ec-3'
             elif detected_type == 'video' and result == 'H264':
                 technical_id = 'avc1'
             elif detected_type == 'video' and result == 'H265':
@@ -400,19 +403,24 @@ class CodecPy:
         """
         result = ProfileInfo(original=codec_string)
         
-        if not codec_string or '.' not in codec_string:
+        if not codec_string:
             return result
             
         # Handle H.264 profiles (avc1.PPCCLL format)
         if codec_string.startswith(('avc1.', 'avc3.')):
             try:
-                profile_part = codec_string.split('.')[1]
+                parts = codec_string.split('.')
+                if len(parts) < 2 or not parts[1]:
+                    return result
+                    
+                profile_part = parts[1]
                 if len(profile_part) >= 6:
-                    profile_code = profile_part[0:2]
+                    # Use uppercase for consistency in profile code matching
+                    profile_code = profile_part[0:2].upper()
                     constraint_code = profile_part[2:4]
                     level_code = profile_part[4:6]
                     
-                    # Map profile codes
+                    # Map profile codes - case insensitive handling
                     profile_map = {
                         '42': 'Baseline',
                         '4D': 'Main',
@@ -421,59 +429,165 @@ class CodecPy:
                         '6E': 'High 10',
                         '7A': 'High 4:2:2',
                         'F4': 'High 4:4:4',
+                        # Additional common profiles
+                        '53': 'Scalable Baseline',
+                        '56': 'Scalable High',
+                        '76': 'Multiview High',
+                        '80': 'Stereo High',
                     }
+                    
+                    # Map constraint flags - bits meaning in constraint_code
+                    constraint_flags = []
+                    constraint_int = int(constraint_code, 16)
+                    if constraint_int & 0x80:
+                        constraint_flags.append("constraint_set0_flag")
+                    if constraint_int & 0x40:
+                        constraint_flags.append("constraint_set1_flag")
+                    if constraint_int & 0x20:
+                        constraint_flags.append("constraint_set2_flag")
+                    if constraint_int & 0x10:
+                        constraint_flags.append("constraint_set3_flag")
                     
                     result.has_profile = True
                     result.profile = profile_map.get(profile_code, f"Unknown ({profile_code})")
                     result.level = float(int(level_code, 16)) / 10
                     result.constraints = constraint_code
-            except Exception:
-                pass
+                    result.constraint_flags = constraint_flags
+                    
+                    # Add detailed profile info
+                    if result.profile == "High" and "constraint_set3_flag" in constraint_flags:
+                        result.profile_details = "High with additional compatibility constraints"
+            except Exception as e:
+                cls.log.debug(f"Error parsing AVC profile: {str(e)}")
                 
-        # Handle H.265/HEVC profiles
+        # Handle H.265/HEVC profiles with improved parsing
         elif codec_string.startswith(('hvc1.', 'hev1.')):
             parts = codec_string.split('.')
             if len(parts) >= 2:
                 try:
-                    # Format might be hvc1.1.6.L150.B0
-                    if len(parts) >= 4 and parts[3].startswith('L'):
+                    # Format: hvc1.1.6.L150.B0 or hvc1.1.6.H150.B0
+                    if len(parts) >= 4 and any(parts[3].startswith(x) for x in ['L', 'H']):
+                        tier_indicator = parts[3][0]
+                        level_value = parts[3][1:]
+                        
+                        # Profile space and profile index mapping
+                        profile_spaces = {
+                            '0': "General",
+                            '1': "Extended",
+                            '2': "Main",
+                            '3': "Reserved"
+                        }
+                        
+                        hevc_profiles = {
+                            '1': "Main",
+                            '2': "Main 10",
+                            '3': "Main Still Picture",
+                            '4': "RExt",
+                            '5': "High Throughput",
+                            '6': "MV-HEVC",
+                            '7': "Scalable Main",
+                            '8': "3D Main",
+                            '9': "SCC",
+                        }
+                        
                         result.has_profile = True
-                        result.profile = f"Profile {parts[1]}"
-                        result.tier = 'Main' if parts[2] == '4' else 'High'
-                        result.level = float(parts[3][1:]) / 30
-                except Exception:
-                    pass
+                        result.profile_space = profile_spaces.get(parts[1], f"Unknown ({parts[1]})")
+                        result.profile = hevc_profiles.get(parts[2], f"Profile {parts[2]}")
+                        result.tier = 'High' if tier_indicator == 'H' else 'Main'
+                        result.level = float(level_value) / 30
+                        
+                        # Extract compatibility flags if present
+                        if len(parts) >= 5 and parts[4].startswith('B'):
+                            result.compatibility_flags = parts[4][1:]
+                except Exception as e:
+                    cls.log.debug(f"Error parsing HEVC profile: {str(e)}")
         
-        # Handle AAC profiles
+        # Handle VP9 profiles
+        elif codec_string.startswith('vp09.'):
+            try:
+                parts = codec_string.split('.')
+                if len(parts) >= 4:
+                    profile_code = parts[1]
+                    level_code = parts[2]
+                    
+                    vp9_profiles = {
+                        '00': 'Profile 0 (8-bit, 4:2:0)',
+                        '01': 'Profile 1 (8-bit, 4:2:2/4:4:4)',
+                        '02': 'Profile 2 (10/12-bit, 4:2:0)',
+                        '03': 'Profile 3 (10/12-bit, 4:2:2/4:4:4)'
+                    }
+                    
+                    result.has_profile = True
+                    result.profile = vp9_profiles.get(profile_code, f"Unknown ({profile_code})")
+                    result.level = float(level_code) / 10
+                    result.bit_depth = parts[3]
+            except Exception as e:
+                cls.log.debug(f"Error parsing VP9 profile: {str(e)}")
+        
+        # Handle AAC profiles with expanded support
         elif codec_string.startswith('mp4a.40.'):
             try:
                 profile_code = codec_string.split('.')[2]
                 profile_map = {
+                    '1': 'AAC Main',
                     '2': 'AAC-LC',
-                    '5': 'HE-AAC',
-                    '29': 'HE-AACv2',
+                    '3': 'AAC SSR',
+                    '4': 'AAC LTP',
+                    '5': 'HE-AAC / SBR',
+                    '6': 'AAC Scalable',
+                    '22': 'ER AAC-LC',
+                    '29': 'HE-AACv2 / SBR+PS',
+                    '39': 'AAC-ELD',
                     '42': 'XHE-AAC',
                 }
                 result.has_profile = True
                 result.profile = profile_map.get(profile_code, f"Unknown ({profile_code})")
-            except Exception:
-                pass
+                result.codec_family = "AAC"
+            except Exception as e:
+                cls.log.debug(f"Error parsing AAC profile: {str(e)}")
                 
-        # Handle DTS profiles
-        elif codec_string.startswith('dts-'):
+        # Handle DTS profiles with extended versions
+        elif codec_string.startswith('dts'):
             try:
-                dts_type = codec_string.split('-')[1].lower()
+                if '-' in codec_string:
+                    dts_type = codec_string.split('-')[1].lower()
+                    profile_map = {
+                        'hd': 'High Definition',
+                        'hdma': 'HD Master Audio',
+                        'hdhr': 'HD High Resolution Audio',
+                        'x': 'DTS:X',
+                        'xll': 'DTS:X Lossless',
+                        'express': 'Express',
+                        'es': 'Extended Surround',
+                        '96/24': '96/24',
+                    }
+                    result.has_profile = True
+                    result.profile = profile_map.get(dts_type, "Core")
+                else:
+                    result.has_profile = True
+                    result.profile = "Core"
+                result.codec_family = "DTS"
+            except Exception as e:
+                cls.log.debug(f"Error parsing DTS profile: {str(e)}")
+        
+        # Handle Dolby profiles
+        elif codec_string.startswith(('ec-3', 'ec3', 'ac-3', 'mlpa')):
+            try:
+                # Standardize the dolby type for both ec-3 and ec3 variants
+                dolby_type = codec_string.split('.')[0].lower()
+                if dolby_type == 'ec3':
+                    dolby_type = 'ec-3'
+                    
                 profile_map = {
-                    'hd': 'High Definition',
-                    'hdma': 'HD Master Audio',
-                    'hdhr': 'HD High Resolution Audio',
-                    'x': 'DTS:X',
-                    'express': 'Express',
+                    'ec-3': 'Dolby Digital Plus (E-AC-3)',
+                    'ac-3': 'Dolby Digital (AC-3)',
+                    'mlpa': 'Dolby TrueHD',
                 }
                 result.has_profile = True
-                result.profile = profile_map.get(dts_type, "Core")
-            except Exception:
-                pass
+                result.profile = profile_map.get(dolby_type)
+                result.codec_family = "Dolby"
+            except Exception as e:
+                cls.log.debug(f"Error parsing Dolby profile: {str(e)}")
                 
         return result
 
@@ -544,7 +658,7 @@ class CodecPy:
     
     @classmethod
     def get_audio_codec_details(cls, codec_string: str, channels: Optional[Union[str, float, int]] = None,
-                            sample_rate: Optional[int] = None, bit_depth: Optional[int] = None) -> AudioCodecDetails:
+                            sample_rate: Optional[int] = None, bit_depth: Optional[int] = None, base_only: Optional[bool] = False) -> AudioCodecDetails:
         """
         Get comprehensive information about an audio codec with channel configuration details.
         
@@ -560,7 +674,7 @@ class CodecPy:
         base_details = cls.get_codec_details(codec_string)
         
         # Only process as audio if the codec is actually an audio codec
-        if base_details.type != CodecType.AUDIO:
+        if base_only and base_details.type != CodecType.AUDIO:
             return base_details
         
         return AudioCodecDetails(

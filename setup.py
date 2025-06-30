@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="codecpy",
-    version="0.1.0",
+    version="0.1.2",
     author="ReiDoBrega",
     author_email="pedro94782079@gmail.com",
     description="A comprehensive Python library for codec identification, normalization and media format analysis",

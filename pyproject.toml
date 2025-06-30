@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "codecpy"
-version = "0.1.0"
+version = "0.1.2"
 description = "A comprehensive Python library for codec identification, normalization and media format analysis"
 authors = ["ReiDoBrega <pedro94782079@gmail.com>"]
 license = "MIT"
